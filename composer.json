@@ -1,0 +1,37 @@
+{
+    "name": "johnnynotsolucky/yii2-zipkin",
+    "homepage": "https://github.com/johnnynotsolucky/yii2-zipkin",
+    "version": "0.1.0",
+    "type": "library",
+    "description": "TODO",
+    "keywords": [
+        "zipkin",
+        "yii2"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Tyrone Tudehope",
+            "email": "hi@tyrone.dev",
+            "homepage": "https://tyrone.dev"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/johnnynotsolucky/yii2-zipkin/issues",
+        "source": "https://github.com/johnnynotsolucky/yii2-zipkin"
+    },
+    "require": {
+        "php": "^7.3 || ^8",
+        "openzipkin/zipkin": "^2.0",
+        "yiisoft/yii2": "~2.0.0"
+    },
+    "config": {
+        "preferred-install": "dist"
+    },
+    "autoload": {
+        "psr-4": {
+            "johnnynotsolucky\\Yii2\\Zipkin\\": "src"
+        }
+    },
+    "minimum-stability": "stable"
+}
