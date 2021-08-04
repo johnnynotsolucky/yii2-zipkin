@@ -2,9 +2,10 @@
 namespace johnnynotsolucky\Yii2\Zipkin;
 
 use yii\log\Logger as YiiLogger;
+use yii\base\Behavior;
 use Zipkin\Tags;
 
-class Logger extends YiiLogger
+class LoggerBehavior extends Behavior
 {
     const LEVEL_MAP = [
         YiiLogger::LEVEL_ERROR => 'error',

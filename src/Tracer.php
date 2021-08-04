@@ -26,7 +26,7 @@ class Tracer extends \yii\base\Component
     private $spanStack = [];
 
 
-    public $localServiceName = 'app';
+    public $localServiceName = null;
 
     public $beforePrefixes = ['before', 'begin'];
 
@@ -103,6 +103,22 @@ class Tracer extends \yii\base\Component
 
         $this->requestSpan = $span;
         $this->setCommonTags($span);
+
+        if ($isConsoleRequest) {
+            Event::on(
+                \yii\base\Application::class,
+                \yii\base\Application::EVENT_AFTER_REQUEST,
+                [$this, 'handleRequestEnd']
+            );
+        } else {
+            Event::on(
+                \yii\web\Response::class,
+                \yii\web\Response::EVENT_AFTER_SEND,
+                [$this, 'handleRequestEnd']
+            );
+        }
+
+        Yii::getLogger()->attachBehavior('tracing', new LoggerBehavior(['tracer' => $this]));
     }
 
     private function getIdxKey($span)
@@ -239,26 +255,11 @@ class Tracer extends \yii\base\Component
                     unset($this->eventSpanIdx[$key]);
                     $this->finishSpan($eventSpan);
                 }
-
-                if (
-                    is_subclass_of($event->sender, Response::class)
-                    && $event->name === \yii\web\Response::EVENT_AFTER_SEND
-                ) {
-                    $this->handleRequestEnd();
-                }
-
-                if (
-                    is_subclass_of($event->sender, \yii\base\Application::class)
-                    && Yii::$app->request->getIsConsoleRequest()
-                    && $event->name === \yii\base\Application::EVENT_AFTER_REQUEST
-                ) {
-                    $this->handleRequestEnd($event);
-                }
             }
         );
     }
 
-    private function handleRequestEnd()
+    public function handleRequestEnd()
     {
         // Finish any unfinished spans.
         foreach ($this->spanStack as $unfinishedSpan) {
@@ -284,14 +285,5 @@ class Tracer extends \yii\base\Component
 
         $this->requestSpan->finish();
         $this->tracer->flush();
-    }
-
-    public function registerProfiling()
-    {
-        $logConfig = array_merge(
-            get_object_vars(Yii::getLogger()),
-            ['tracer' => $this],
-        );
-        Yii::setLogger(new Logger($logConfig));
     }
 }
