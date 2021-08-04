@@ -49,6 +49,8 @@ class Tracer extends \yii\base\Component
     public $zipkinEndpoint = null;
     public $zipkinReporter = null;
 
+    public $pathFilterRules = [];
+
     public $isSampled;
 
     public function init()
@@ -64,7 +66,19 @@ class Tracer extends \yii\base\Component
         if ($isConsoleRequest) {
             $sampler = $this->consoleSampler ?? BinarySampler::createAsAlwaysSample();
         } else {
-            $sampler = $this->webSampler ?? PercentageSampler::create(self::DEFAULT_WEB_SAMPLE_RATE);
+            $canSample = true;
+
+            $path = Yii::$app->request->getUrl();
+            foreach ($this->pathFilterRules as $rule) {
+                if (preg_match($rule, $path)) {
+                    $canSample = false;
+                    break;
+                }
+            }
+
+            $sampler = $canSample
+                ? $this->webSampler ?? PercentageSampler::create(self::DEFAULT_WEB_SAMPLE_RATE)
+                : BinarySampler::createAsNeverSample();
         }
 
         $serviceName = $this->localServiceName ? "{$this->localServiceName}-" : '';
@@ -151,7 +165,7 @@ class Tracer extends \yii\base\Component
         if (!$request->getIsConsoleRequest()) {
             $span->tag(Tags\HTTP_HOST, $request->getHostInfo());
             $span->tag(Tags\HTTP_METHOD, $request->getMethod());
-            $span->tag(Tags\HTTP_PATH, $request->getUrl());
+            $span->tag(Tags\HTTP_PATH, $request->getPathInfo());
             $span->tag('http.query_string', $request->getQueryString());
         } else {
             $response = Yii::$app->response;
