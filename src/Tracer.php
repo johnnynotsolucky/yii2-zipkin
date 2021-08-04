@@ -256,22 +256,34 @@ class Tracer extends \yii\base\Component
                 }
 
                 if ($eventSpan === null) {
-                    $eventSpan = $this->getNextSpan();
-                    $eventSpan->start();
-                    $eventSpan->setKind(\Zipkin\Kind\SERVER);
-                    $eventSpan->setName("event:{$class}:{$key}");
-
-                    if ($callable !== null) {
-                        call_user_func($callable, $event, $eventSpan);
+                    $spanKey = "event:{$class}:{$key}";
+                    $shouldCreateSpan = true;
+                    $tags = [];
+                    if (is_callable($callable)) {
+                        $result = call_user_func($callable, $event, $key);
+                        if (is_array($result)) {
+                            $tags = $result;
+                        } else if ($result === false) {
+                            $shouldCreateSpan = false;
+                        }
                     }
 
+                    if ($shouldCreateSpan) {
+                        $eventSpan = $this->getNextSpan();
+                        $eventSpan->start();
+                        foreach ($tags as $tag => $value) {
+                            $eventSpan->tag($tag, $value);
+                        }
+                        $eventSpan->setKind(\Zipkin\Kind\SERVER);
+                        $eventSpan->setName($spanKey);
+                    }
                 }
 
-                if ($isBefore) {
+                if ($eventSpan && $isBefore) {
                     $this->eventSpanIdx[$key] = $this->getSpanIdx($eventSpan);
                 }
 
-                if ($isAfter || !$isBefore) {
+                if ($eventSpan && ($isAfter || !$isBefore)) {
                     unset($this->eventSpanIdx[$key]);
                     $this->finishSpan($eventSpan);
                 }
