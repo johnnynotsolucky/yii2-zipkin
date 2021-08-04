@@ -71,8 +71,8 @@ class Tracer extends \yii\base\Component
         $tracing = TracingBuilder::create()
             ->havingLocalServiceName(
                 $isConsoleRequest
-                    ? "{$serviceName}-console"
-                    : "{$serviceName}-web"
+                    ? "{$serviceName}console"
+                    : "{$serviceName}web"
             )
             ->havingSampler($sampler)
             ->havingReporter($reporter)
