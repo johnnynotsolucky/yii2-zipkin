@@ -4,9 +4,11 @@ namespace johnnynotsolucky\Yii2\Zipkin;
 use Yii;
 use yii\base\Response;
 use yii\base\Event;
+use yii\log\Logger as YiiLogger;
 
 use Zipkin\Annotation;
 use Zipkin\Samplers\BinarySampler;
+use Zipkin\Samplers\PercentageSampler;
 use Zipkin\TracingBuilder;
 use Zipkin\Reporters\Http;
 use Zipkin\Propagation\Map;
@@ -14,6 +16,8 @@ use Zipkin\Tags;
 
 class Tracer extends \yii\base\Component
 {
+    const DEFAULT_WEB_SAMPLE_RATE = 0.3;
+
     private $tracer;
     private $requestSpan;
 
@@ -21,20 +25,54 @@ class Tracer extends \yii\base\Component
     private $spanIdx = [];
     private $spanStack = [];
 
-    public $zipkinEndpoint;
+
     public $localServiceName = 'app';
+
     public $beforePrefixes = ['before', 'begin'];
+
     public $afterPrefixes = ['after', 'end'];
+
+    public $enableProfiling = true;
+
+    public $enableLogEvents = true;
+
+    public $logLevels = [
+        YiiLogger::LEVEL_ERROR,
+        YiiLogger::LEVEL_WARNING,
+        YiiLogger::LEVEL_INFO,
+    ];
+
+    public $webSampler = null;
+
+    public $consoleSampler = null;
+
+    public $zipkinEndpoint = null;
+    public $zipkinReporter = null;
+
+    public $isSampled;
 
     public function init()
     {
-        $reporter = new Http(['endpoint_url' => $this->zipkinEndpoint]);
-        $sampler = BinarySampler::createAsAlwaysSample();
+        $isConsoleRequest = Yii::$app->request->getIsConsoleRequest();
+
+        if ($this->zipkinEndpoint === null && $this->zipkinReporter === null) {
+            throw new \yii\base\InvalidConfigException('Missing Zipkin reporter.');
+        }
+
+        $reporter = $this->zipkinReporter ?? new Http(['endpoint_url' => $this->zipkinEndpoint]);
+
+        if ($isConsoleRequest) {
+            $sampler = $this->consoleSampler ?? BinarySampler::createAsAlwaysSample();
+        } else {
+            $sampler = $this->webSampler ?? PercentageSampler::create(self::DEFAULT_WEB_SAMPLE_RATE);
+        }
+
+        $serviceName = $this->localServiceName ? "{$this->localServiceName}-" : '';
         $tracing = TracingBuilder::create()
             ->havingLocalServiceName(
-                Yii::$app->request->getIsConsoleRequest()
-                    ? "{$this->localServiceName}-console"
-                    : "{$this->localServiceName}-web"
+                $isConsoleRequest
+                    ? "{$serviceName}-console"
+                    : "{$serviceName}-web"
             )
             ->havingSampler($sampler)
             ->havingReporter($reporter)
@@ -51,14 +89,17 @@ class Tracer extends \yii\base\Component
             return $header[0];
         }, $headers);
 
-        /* Extracts the context from the HTTP headers */
+        // Extracts the context from the HTTP headers
         $extractor = $tracing->getPropagation()->getExtractor(new Map());
         $extractedContext = $extractor($carrier);
 
         $span = $this->tracer->newTrace($extractedContext);
+
+        $this->isSampled = $span->getContext()->isSampled();
+
         $span->start();
         $span->setKind(\Zipkin\Kind\SERVER);
-        $span->setName('request');
+        $span->setName(($isConsoleRequest ? 'console' : 'http').':request');
 
         $this->requestSpan = $span;
         $this->setCommonTags($span);

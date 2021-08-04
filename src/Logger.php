@@ -6,6 +6,13 @@ use Zipkin\Tags;
 
 class Logger extends YiiLogger
 {
+    const LEVEL_MAP = [
+        YiiLogger::LEVEL_ERROR => 'error',
+        YiiLogger::LEVEL_WARNING => 'warning',
+        YiiLogger::LEVEL_INFO => 'info',
+        YiiLogger::LEVEL_TRACE => 'trace',
+    ];
+
     private $profileSpanIdx = [];
 
     public $tracer;
@@ -16,9 +23,13 @@ class Logger extends YiiLogger
     public function log($message, $level, $category = 'application')
     {
         if (in_array($level, [static::LEVEL_PROFILE_BEGIN, static::LEVEL_PROFILE_END])) {
-            $this->handleProfileLog($message, $level, $category);
+            if ($this->tracer->enableProfiling) {
+                $this->handleProfileLog($message, $level, $category);
+            }
         } else {
-            $this->handleMetricLog($message, $level, $category);
+            if ($this->tracer->enableLogEvents && in_array($level, $this->tracer->logLevels)) {
+                $this->handleMetricLog($message, $level, $category);
+            }
         }
 
         parent::log($message, $level, $category);
@@ -30,11 +41,18 @@ class Logger extends YiiLogger
         $name = str_replace('::', ':', $name);
 
         $span = $this->tracer->getNextSpan();
-        $span->start();
         $span->setKind(\Zipkin\Kind\SERVER);
-        $span->setName("metric:{$name}");
-        $span->tag('log.data', json_encode($message));
-        $span->tag('log.level', $level);
+        $span->setName("log:{$name}");
+
+        $message = is_string($message) ? $message : json_encode($message);
+        if ($level === YiiLogger::LEVEL_ERROR) {
+            $span->tag('error', $message);
+        } else {
+            $span->tag('log.data', $message);
+        }
+
+        $span->tag('log.level', self::LEVEL_MAP[$level]);
+        $span->start();
         $this->tracer->finishSpan($span);
     }
 
@@ -55,10 +73,11 @@ class Logger extends YiiLogger
             $span->setKind(\Zipkin\Kind\SERVER);
             $span->setName("profile:${profilePrefix}{$name}");
 
+            $message = is_string($message) ? $message : json_encode($message);
             if ($isDbProfile) {
-                $span->tag(Tags\SQL_QUERY, json_encode($message));
+                $span->tag(Tags\SQL_QUERY, $message);
             } else {
-                $span->tag('profile.data', json_encode($message));
+                $span->tag('profile.data', $message);
             }
 
             $this->profileSpanIdx[$key] = $tracer->getSpanIdx($span);
