@@ -19,12 +19,13 @@ class Tracer extends \yii\base\Component
     const DEFAULT_WEB_SAMPLE_RATE = 0.3;
 
     private $tracer;
-    private $requestSpan;
 
     private $eventSpanIdx = [];
     private $spanIdx = [];
     private $spanStack = [];
+    private $extractedContext = null;
 
+    private $_initialized = false;
 
     public $localServiceName = null;
 
@@ -51,18 +52,25 @@ class Tracer extends \yii\base\Component
 
     public $pathFilterRules = [];
 
+    public $defaultKind = \Zipkin\Kind\SERVER;
+
+    public $requestSpanName = null;
+
     public $isSampled;
 
     public function init()
     {
-        $isConsoleRequest = Yii::$app->request->getIsConsoleRequest();
-
         if ($this->zipkinEndpoint === null && $this->zipkinReporter === null) {
             throw new \yii\base\InvalidConfigException('Missing Zipkin reporter.');
         }
+    }
 
-        $reporter = $this->zipkinReporter ?? new Http(['endpoint_url' => $this->zipkinEndpoint]);
-
+    public function initializeTracing()
+    {
+        $isConsoleRequest = Yii::$app->request->getIsConsoleRequest();
+        if ($this->requestSpanName === null) {
+            $this->requestSpanName = ($isConsoleRequest ? 'console' : 'http').':request';
+        }
         if ($isConsoleRequest) {
             $sampler = $this->consoleSampler ?? BinarySampler::createAsAlwaysSample();
         } else {
@@ -81,13 +89,9 @@ class Tracer extends \yii\base\Component
                 : BinarySampler::createAsNeverSample();
         }
 
-        $serviceName = $this->localServiceName ? "{$this->localServiceName}-" : '';
+        $reporter = $this->zipkinReporter ?? new Http(['endpoint_url' => $this->zipkinEndpoint]);
         $tracing = TracingBuilder::create()
-            ->havingLocalServiceName(
-                $isConsoleRequest
-                    ? "{$serviceName}console"
-                    : "{$serviceName}web"
-            )
+            ->havingLocalServiceName($this->localServiceName)
             ->havingSampler($sampler)
             ->havingReporter($reporter)
             ->build();
@@ -105,18 +109,7 @@ class Tracer extends \yii\base\Component
 
         // Extracts the context from the HTTP headers
         $extractor = $tracing->getPropagation()->getExtractor(new Map());
-        $extractedContext = $extractor($carrier);
-
-        $span = $this->tracer->newTrace($extractedContext);
-
-        $this->isSampled = $span->getContext()->isSampled();
-
-        $span->start();
-        $span->setKind(\Zipkin\Kind\SERVER);
-        $span->setName(($isConsoleRequest ? 'console' : 'http').':request');
-
-        $this->requestSpan = $span;
-        $this->setCommonTags($span);
+        $this->extractedContext = $extractor($carrier);
 
         if ($isConsoleRequest) {
             Event::on(
@@ -132,12 +125,28 @@ class Tracer extends \yii\base\Component
             );
         }
 
-        if ($this->enableProfiling || $this->enableLogEvents) {
-            $logConfig = array_merge(
-                get_object_vars(Yii::getLogger()),
-                ['tracer' => $this],
-            );
-            Yii::setLogger(new Logger($logConfig));
+        $logConfig = array_merge(
+            get_object_vars(Yii::getLogger()),
+            ['tracer' => $this],
+        );
+        Yii::setLogger(new Logger($logConfig));
+
+        $requestSpan = $this->getNextSpanInternal(true);
+        $requestSpan->start();
+        $requestSpan->setKind($this->defaultKind);
+        $requestSpan->setName($this->requestSpanName);
+
+        $this->_initialized = true;
+    }
+
+    private function createRequestSpan()
+    {
+    }
+
+    private function ensureInitialized()
+    {
+        if (!$this->_initialized) {
+            throw new \yii\base\InvalidConfigException('Tracer has not been initialized.');
         }
     }
 
@@ -162,11 +171,12 @@ class Tracer extends \yii\base\Component
     private function setCommonTags($span)
     {
         $request = Yii::$app->request;
-        if (!$request->getIsConsoleRequest()) {
+        if (!Yii::$app->request->getIsConsoleRequest()) {
             $span->tag(Tags\HTTP_HOST, $request->getHostInfo());
             $span->tag(Tags\HTTP_METHOD, $request->getMethod());
             $span->tag(Tags\HTTP_PATH, $request->getPathInfo());
             $span->tag('http.query_string', $request->getQueryString());
+            $span->tag('http.body', $request->getRawBody());
         } else {
             $response = Yii::$app->response;
             [$command, $params] = $request->resolve();
@@ -175,14 +185,21 @@ class Tracer extends \yii\base\Component
         }
     }
 
-    public function getNextSpan()
+    public function getRequestSpan()
     {
-        if (count($this->spanStack) > 0) {
-            $parentSpan = $this->spanStack[array_key_last($this->spanStack)];
+        $this->ensureInitialized();
+        return $this->getSpanAtIdx(0);
+    }
+
+    private function getNextSpanInternal($initial)
+    {
+        if ($initial) {
+            $span = $this->tracer->newTrace($this->extractedContext);
+            $this->isSampled = $span->getContext()->isSampled();
         } else {
-            $parentSpan = $this->requestSpan;
+            $parentSpan = $this->spanStack[array_key_last($this->spanStack)];
+            $span = $this->tracer->newChild($parentSpan->getContext());
         }
-        $span = $this->tracer->newChild($parentSpan->getContext());
 
         $this->setCommonTags($span);
 
@@ -191,6 +208,12 @@ class Tracer extends \yii\base\Component
         $this->spanStack[] = $span;
 
         return $span;
+    }
+
+    public function getNextSpan()
+    {
+        $this->ensureInitialized();
+        return $this->getNextSpanInternal(false);
     }
 
     public function finishSpan($span)
@@ -234,6 +257,8 @@ class Tracer extends \yii\base\Component
 
     public function registerEvents(callable $callable = null)
     {
+        $this->ensureInitialized();
+
         Event::on(
             '*',
             '*',
@@ -294,7 +319,10 @@ class Tracer extends \yii\base\Component
     public function handleRequestEnd()
     {
         // Finish any unfinished spans.
-        foreach ($this->spanStack as $unfinishedSpan) {
+        $spanStack = array_reverse($this->spanStack);
+        $requestSpan = array_pop($spanStack);
+
+        foreach ($spanStack as $unfinishedSpan) {
             $unfinishedSpan->finish();
         }
 
@@ -302,20 +330,20 @@ class Tracer extends \yii\base\Component
         $response = Yii::$app->response;
 
         if (!Yii::$app->request->getIsConsoleRequest()) {
-            $this->requestSpan->tag(Tags\HTTP_STATUS_CODE, $response->getStatusCode());
+            $requestSpan->tag(Tags\HTTP_STATUS_CODE, $response->getStatusCode());
 
             if ($response->getIsClientError()) {
-                $this->requestSpan->tag('error', 'Client error');
+                $requestSpan->tag('error', 'Client error');
             }
 
             if ($response->getIsServerError()) {
-                $this->requestSpan->tag('error', 'Server error');
+                $requestSpan->tag('error', 'Server error');
             }
         } else {
-            $this->requestSpan->tag('console.status_code', $response->exitStatus);
+            $requestSpan->tag('console.status_code', $response->exitStatus);
         }
 
-        $this->requestSpan->finish();
+        $requestSpan->finish();
         $this->tracer->flush();
     }
 }
