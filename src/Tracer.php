@@ -118,7 +118,13 @@ class Tracer extends \yii\base\Component
             );
         }
 
-        Yii::getLogger()->attachBehavior('tracing', new LoggerBehavior(['tracer' => $this]));
+        if ($this->enableProfiling || $this->enableLogEvents) {
+            $logConfig = array_merge(
+                get_object_vars(Yii::getLogger()),
+                ['tracer' => $this],
+            );
+            Yii::setLogger(new Logger($logConfig));
+        }
     }
 
     private function getIdxKey($span)
