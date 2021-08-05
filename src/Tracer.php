@@ -27,15 +27,15 @@ class Tracer extends \yii\base\Component
 
     private $_initialized = false;
 
-    public $localServiceName = null;
+    public $localServiceName = 'app';
 
     public $beforePrefixes = ['before', 'begin'];
 
     public $afterPrefixes = ['after', 'end'];
 
-    public $enableProfiling = true;
+    public $enableProfiling = false;
 
-    public $enableLogEvents = true;
+    public $enableLogEvents = false;
 
     public $logLevels = [
         YiiLogger::LEVEL_ERROR,
