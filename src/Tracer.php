@@ -25,6 +25,8 @@ class Tracer extends \yii\base\Component
     private $spanStack = [];
     private $extractedContext = null;
 
+    private $isSampled;
+
     private $_initialized = false;
 
     public $localServiceName = 'app';
@@ -56,8 +58,6 @@ class Tracer extends \yii\base\Component
 
     public $requestSpanName = null;
 
-    public $isSampled;
-
     public function init()
     {
         if ($this->zipkinEndpoint === null && $this->zipkinReporter === null) {
@@ -65,8 +65,17 @@ class Tracer extends \yii\base\Component
         }
     }
 
+    public function getIsSampled()
+    {
+        return $this->isSampled;
+    }
+
     public function initializeTracing()
     {
+        if ($this->_initialized) {
+            return;
+        }
+
         $isConsoleRequest = Yii::$app->request->getIsConsoleRequest();
         if ($this->requestSpanName === null) {
             $this->requestSpanName = ($isConsoleRequest ? 'console' : 'http').':request';
