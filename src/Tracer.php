@@ -74,17 +74,17 @@ class Tracer extends \yii\base\Component
         if ($isConsoleRequest) {
             $sampler = $this->consoleSampler ?? BinarySampler::createAsAlwaysSample();
         } else {
-            $canSample = true;
+            $shouldSample = true;
 
             $path = Yii::$app->request->getUrl();
             foreach ($this->pathFilterRules as $rule) {
                 if (preg_match($rule, $path)) {
-                    $canSample = false;
+                    $shouldSample = false;
                     break;
                 }
             }
 
-            $sampler = $canSample
+            $sampler = $shouldSample
                 ? $this->webSampler ?? PercentageSampler::create(self::DEFAULT_WEB_SAMPLE_RATE)
                 : BinarySampler::createAsNeverSample();
         }
