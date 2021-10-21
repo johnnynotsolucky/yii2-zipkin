@@ -277,9 +277,8 @@ class Tracer extends \yii\base\Component
                 $name = $event->name;
                 $class = $this->getClassName($event);
 
-                $spanKey = "{$class}:{$key}";
                 foreach ($this->eventExcludeRules as $rule) {
-                    if (preg_match($rule, $spanKey)) {
+                    if (preg_match($rule, "{$class}:{$name}")) {
                         return;
                     }
                 }
@@ -317,7 +316,7 @@ class Tracer extends \yii\base\Component
                             $eventSpan->tag($tag, $value);
                         }
                         $eventSpan->setKind(\Zipkin\Kind\SERVER);
-                        $eventSpan->setName("event:$spanKey");
+                        $eventSpan->setName("event:{$class}:{$key}");
                     }
                 }
 
