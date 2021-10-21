@@ -277,7 +277,7 @@ class Tracer extends \yii\base\Component
                 $name = $event->name;
                 $class = $this->getClassName($event);
 
-                foreach ($this->eventFilterRules as $rule) {
+                foreach ($this->eventExcludeRules as $rule) {
                     if (preg_match($rule, $name)) {
                         return;
                     }
