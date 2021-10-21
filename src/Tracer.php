@@ -33,7 +33,9 @@ class Tracer extends \yii\base\Component
 
     public $beforePrefixes = ['before', 'begin'];
 
-    public $afterPrefixes = ['after', 'end'];
+    public $afterPrefixes = ['after', 'end', 'commit', 'rollback'];
+
+    public $eventExcludeRules = [];
 
     public $enableProfiling = false;
 
@@ -52,7 +54,7 @@ class Tracer extends \yii\base\Component
     public $zipkinEndpoint = null;
     public $zipkinReporter = null;
 
-    public $pathFilterRules = [];
+    public $pathExcludeRules = [];
 
     public $defaultKind = \Zipkin\Kind\SERVER;
 
@@ -86,7 +88,7 @@ class Tracer extends \yii\base\Component
             $shouldSample = true;
 
             $path = Yii::$app->request->getUrl();
-            foreach ($this->pathFilterRules as $rule) {
+            foreach ($this->pathExcludeRules as $rule) {
                 if (preg_match($rule, $path)) {
                     $shouldSample = false;
                     break;
@@ -275,6 +277,12 @@ class Tracer extends \yii\base\Component
                 $name = $event->name;
                 $class = $this->getClassName($event);
 
+                foreach ($this->eventFilterRules as $rule) {
+                    if (preg_match($rule, $name)) {
+                        return;
+                    }
+                }
+
                 $key = $name;
                 $isBefore = $this->startsWith($name, $this->beforePrefixes);
                 $isAfter = $this->startsWith($name, $this->afterPrefixes);
@@ -314,10 +322,16 @@ class Tracer extends \yii\base\Component
                 }
 
                 if ($eventSpan && $isBefore) {
+                    $eventSpan->tag('event.before', $event->name);
                     $this->eventSpanIdx[$key] = $this->getSpanIdx($eventSpan);
                 }
 
                 if ($eventSpan && ($isAfter || !$isBefore)) {
+                    if ($isAfter) {
+                        $eventSpan->tag('event.after', $event->name);
+                    } else {
+                        $eventSpan->tag('event.name', $event->name);
+                    }
                     unset($this->eventSpanIdx[$key]);
                     $this->finishSpan($eventSpan);
                 }
