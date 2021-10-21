@@ -37,6 +37,8 @@ class Tracer extends \yii\base\Component
 
     public $eventExcludeRules = [];
 
+    public $onlySpanEvents = false;
+
     public $enableProfiling = false;
 
     public $enableLogEvents = false;
@@ -278,6 +280,17 @@ class Tracer extends \yii\base\Component
                 $class = $this->getClassName($event);
 
                 foreach ($this->eventExcludeRules as $rule) {
+                    if (preg_match($rule, "{$class}:{$name}")) {
+                        return;
+                    }
+                }
+
+                if ($this->onlySpanEvents) {
+                    $joinedPrefixes = implode(
+                        '|',
+                        array_merge($this->beforePrefixes, $this->afterPrefixes)
+                    );
+                    $rule = "/.*:(?!{$joinedPrefixes}).*/i";
                     if (preg_match($rule, "{$class}:{$name}")) {
                         return;
                     }
